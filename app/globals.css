@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: #ffffff;
+  color: #1d1d1f;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Titres : traitement « SF Pro Display » — resserré, dense */
+.display {
+  letter-spacing: -0.022em;
+}
+.display-tight {
+  letter-spacing: -0.03em;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-150 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none;
+  }
+  /* Noir plein — l'action principale, façon bouton Apple */
+  .btn-primary {
+    @apply btn bg-noir text-blanc hover:bg-encre;
+  }
+  /* Contour discret sur blanc */
+  .btn-ghost {
+    @apply btn border border-ligne bg-blanc text-encre hover:bg-nuage;
+  }
+  /* Variante « pilule » pour les grands CTA (accueil / public) */
+  .btn-pill {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-[15px] font-medium transition-all duration-150 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-danger {
+    @apply btn bg-nonpaye text-blanc hover:brightness-95;
+  }
+  .card {
+    @apply rounded-2xl border border-brume bg-blanc shadow-carte;
+  }
+  .input {
+    @apply w-full rounded-xl border border-ligne bg-blanc px-3.5 py-2.5 text-encre placeholder-ardoise/60 outline-none transition focus:border-encre focus:shadow-focus;
+  }
+  .label {
+    @apply mb-1.5 block text-[13px] font-medium text-ardoise;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-ardoise;
+  }
+}
+
+/* Checkbox monochrome : coche noire */
+input[type="checkbox"] {
+  accent-color: #1d1d1f;
+}
+
+/* ---- Impression PDF (Cmd/Ctrl + P sur la page bilan) ---- */
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .card {
+    border: 1px solid #d2d2d7 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
