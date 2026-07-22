@@ -24,7 +24,10 @@ export function exporterExcel(
   const eqEquipe = equipes.map((e) => ({
     id: e.id,
     nom: e.nom,
-    joueurs: (e.joueurs ?? []).map((j) => ({ nom: j.nom, paye: j.paye })),
+    joueurs: (e.joueurs ?? []).map((j) => ({
+      nom: `${j.prenom ?? ""} ${j.nom ?? ""}`.trim(),
+      paye: j.paye,
+    })),
   }));
 
   const rentreeInscriptions =
@@ -44,13 +47,27 @@ export function exporterExcel(
 
   // Feuille Équipes
   const equipesRows = equipes.map((e) => {
-    const eq = { id: e.id, nom: e.nom, joueurs: (e.joueurs ?? []).map((j) => ({ nom: j.nom, paye: j.paye })) };
+    const eq = {
+      id: e.id,
+      nom: e.nom,
+      joueurs: (e.joueurs ?? []).map((j) => ({
+        nom: `${j.prenom ?? ""} ${j.nom ?? ""}`.trim(),
+        paye: j.paye,
+      })),
+    };
     return {
       Équipe: e.nom,
       "Liste d'attente": e.liste_attente ? "Oui" : "Non",
+      Vigilance: e.vigilance ? "Oui" : "Non",
       Contact: `${e.contact_prenom ?? ""} ${e.contact_nom ?? ""}`.trim(),
       Téléphone: e.contact_telephone ?? "",
-      Joueurs: (e.joueurs ?? []).map((j) => j.nom).join(", "),
+      Joueurs: (e.joueurs ?? [])
+        .map((j) => `${j.prenom ?? ""} ${j.nom ?? ""}`.trim())
+        .join(", "),
+      "E-mails joueurs": (e.joueurs ?? [])
+        .map((j) => j.email ?? "")
+        .filter(Boolean)
+        .join(", "),
       "Nb joueurs": e.joueurs?.length ?? 0,
       "Boissons récupérées": (e.joueurs ?? []).filter((j) => j.boisson).length,
       "Montant dû (€)": montantDu(eq, tarif),

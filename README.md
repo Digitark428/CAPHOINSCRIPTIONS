@@ -5,7 +5,8 @@ de beach-volley de l'association **CAP HOMARD BEACH VOLLEY 974** (La Réunion).
 
 - **Inscriptions publiques** via un **lien unique** (`/inscription`) : les joueurs y
   voient tous les tournois ouverts, choisissent le leur, puis remplissent le formulaire
-  (contact obligatoire, engagements à cocher, paiement sur place).
+  (contact référent obligatoire, puis **prénom, nom et e-mail obligatoires pour
+  chaque joueur**, engagements à cocher, paiement sur place).
 - **Espace organisateur sécurisé** : tableau de bord, affiche par tournoi, équipes
   entièrement modifiables, suivi des paiements et des boissons par joueur, limite de
   places + liste d'attente, bilan financier automatique, archivage / suppression.
@@ -54,7 +55,7 @@ cap-homard/
 │   ├── upload.ts                     Envoi des affiches (Supabase Storage)
 │   └── supabase/                     Connexion Supabase (client + serveur)
 ├── supabase/
-│   └── schema.sql                    ⭐ LE fichier à lancer (une fois) sur ton projet
+│   └── schema.sql                    ⭐ LE fichier à lancer sur ton projet Supabase
 ├── middleware.ts                     Protection de l'espace /admin
 └── .env.example                      Variables d'environnement à copier
 ```
@@ -157,13 +158,28 @@ dans les finances. Elles apparaissent dans l'onglet **Équipes**, dans une secti
 et clique **« Faire passer inscrite »** : elle rejoint les équipes inscrites et
 libère sa place dans la file.
 
+### Liste de vigilance
+Menu **Vigilance** : ajoute les personnes à surveiller (prénom, nom, motif, date,
+active oui/non). À chaque inscription, tous les joueurs sont contrôlés
+automatiquement — comparaison **insensible aux accents et aux majuscules**. Si un
+joueur correspond à une fiche **active**, l'équipe est placée d'office en **liste
+d'attente** (elle ne prend pas de place officielle) et un message le lui explique.
+Chaque fiche peut être modifiée, désactivée ou supprimée.
+
 ### Suivre paiements, boissons et équipes
 Onglet **Équipes** : dépliez une équipe pour **tout modifier** — nom d'équipe,
-contact, noms des joueurs, ajout / suppression de joueurs. Pour chaque joueur, deux
-cases : **Payé** et **🥤 Boisson** (la boisson offerte a-t-elle été récupérée). Le
-statut de paiement passe de 🔴 → 🟠 → 🟢, et l'Aperçu récapitule les places
-occupées et le total des boissons récupérées. Recherche par équipe, joueur ou
-contact.
+contact, **prénom / nom / e-mail** de chaque joueur, ajout / suppression de joueurs,
+et pour chacun les cases **Payé** et **🥤 Boisson**.
+
+> ⚠️ **Rien n'est enregistré automatiquement.** Vos modifications restent en mémoire
+> (l'équipe affiche « Non enregistré ») jusqu'au clic sur **« Enregistrer les
+> modifications »**. L'application envoie alors tout d'un bloc, **relit la base pour
+> vérifier** que tout est bien écrit, puis confirme (✓) ou signale une erreur (✕).
+> Un bouton « Annuler les modifications » permet de revenir à l'état enregistré.
+
+Le statut de paiement passe de 🔴 → 🟠 → 🟢, et l'Aperçu récapitule les places
+occupées et le total des boissons récupérées. Recherche par équipe, joueur, e-mail
+ou contact.
 
 ### Archiver ou supprimer
 Depuis la liste des tournois (menu **…**) ou le tableau de bord : **Archiver**

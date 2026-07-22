@@ -100,21 +100,14 @@ export function TournoiDashboard({
 
   /* ---------------- Mutations ---------------- */
 
-  async function toggleJoueur(equipeId: string, joueurId: string, paye: boolean) {
-    setEquipes((prev) =>
-      prev.map((e) =>
-        e.id === equipeId
-          ? { ...e, joueurs: e.joueurs.map((j) => (j.id === joueurId ? { ...j, paye } : j)) }
-          : e
-      )
-    );
-    await supabase.from("joueurs").update({ paye }).eq("id", joueurId);
-  }
-
   async function supprimerEquipe(equipeId: string) {
     if (!confirm("Supprimer cette équipe ? Cette action est définitive.")) return;
+    const { error } = await supabase.from("equipes").delete().eq("id", equipeId);
+    if (error) {
+      alert("Suppression impossible : " + error.message);
+      return;
+    }
     setEquipes((prev) => prev.filter((e) => e.id !== equipeId));
-    await supabase.from("equipes").delete().eq("id", equipeId);
   }
 
   async function majTournoi(champ: keyof Tournoi, valeur: any) {
@@ -305,7 +298,6 @@ export function TournoiDashboard({
           setEquipes={setEquipes}
           tarif={tarif}
           tournoiId={tournoi.id}
-          onToggleJoueur={toggleJoueur}
           onSupprimer={supprimerEquipe}
         />
       )}
@@ -507,19 +499,87 @@ function StatCard({
 /* ============================================================
  *  Équipes — édition complète
  * ============================================================ */
+/* ============================================================
+ *  Équipes — édition en brouillon + enregistrement explicite
+ *  Rien n'est envoyé à Supabase tant qu'on ne clique pas sur
+ *  « Enregistrer les modifications ». La sauvegarde est vérifiée
+ *  en relisant la base avant d'afficher le succès.
+ * ============================================================ */
+
+interface DraftJoueur {
+  id: string; // id réel, ou "new-…" pour un joueur pas encore enregistré
+  estNouveau: boolean;
+  prenom: string;
+  nom: string;
+  email: string;
+  paye: boolean;
+  boisson: boolean;
+}
+
+interface DraftEquipe {
+  nom: string;
+  contact_prenom: string;
+  contact_nom: string;
+  contact_telephone: string;
+  joueurs: DraftJoueur[];
+}
+
+const txt = (v: string | null | undefined) => (v ?? "").trim();
+
+function draftDepuis(e: EquipeRow): DraftEquipe {
+  return {
+    nom: e.nom ?? "",
+    contact_prenom: e.contact_prenom ?? "",
+    contact_nom: e.contact_nom ?? "",
+    contact_telephone: e.contact_telephone ?? "",
+    joueurs: [...(e.joueurs ?? [])]
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+      .map((j) => ({
+        id: j.id,
+        estNouveau: false,
+        prenom: j.prenom ?? "",
+        nom: j.nom ?? "",
+        email: j.email ?? "",
+        paye: j.paye,
+        boisson: j.boisson,
+      })),
+  };
+}
+
+function draftIdentique(d: DraftEquipe, e: EquipeRow): boolean {
+  const ref = draftDepuis(e);
+  if (
+    txt(d.nom) !== txt(ref.nom) ||
+    txt(d.contact_prenom) !== txt(ref.contact_prenom) ||
+    txt(d.contact_nom) !== txt(ref.contact_nom) ||
+    txt(d.contact_telephone) !== txt(ref.contact_telephone)
+  )
+    return false;
+  if (d.joueurs.length !== ref.joueurs.length) return false;
+  return d.joueurs.every((j, i) => {
+    const r = ref.joueurs[i];
+    return (
+      j.id === r.id &&
+      txt(j.prenom) === txt(r.prenom) &&
+      txt(j.nom) === txt(r.nom) &&
+      txt(j.email).toLowerCase() === txt(r.email).toLowerCase() &&
+      j.paye === r.paye &&
+      j.boisson === r.boisson
+    );
+  });
+}
+
 function EquipesTab({
   equipes,
   setEquipes,
   tarif,
   tournoiId,
-  onToggleJoueur,
   onSupprimer,
 }: {
   equipes: EquipeRow[];
   setEquipes: React.Dispatch<React.SetStateAction<EquipeRow[]>>;
   tarif: number;
   tournoiId: string;
-  onToggleJoueur: (equipeId: string, joueurId: string, paye: boolean) => void;
   onSupprimer: (id: string) => void;
 }) {
   const supabase = createClient();
@@ -531,10 +591,13 @@ function EquipesTab({
   const matches = (e: EquipeRow) =>
     !s ||
     e.nom.toLowerCase().includes(s) ||
-    e.joueurs.some((j) => j.nom.toLowerCase().includes(s)) ||
+    e.joueurs.some((j) =>
+      `${j.prenom ?? ""} ${j.nom ?? ""} ${j.email ?? ""}`
+        .toLowerCase()
+        .includes(s)
+    ) ||
     `${e.contact_prenom ?? ""} ${e.contact_nom ?? ""}`.toLowerCase().includes(s);
 
-  // Équipes inscrites (hors liste d'attente), triées par nom.
   const inscrites = useMemo(
     () =>
       equipes
@@ -546,7 +609,6 @@ function EquipesTab({
     [equipes, s]
   );
 
-  // Liste d'attente, triée par ordre d'inscription (created_at croissant).
   const attenteOrdre = useMemo(
     () =>
       equipes
@@ -564,82 +626,152 @@ function EquipesTab({
   );
   const rangDe = (id: string) => attenteOrdre.findIndex((x) => x.id === id) + 1;
 
-  /* --- Mutations d'édition --- */
-  async function majEquipe(equipeId: string, patch: Partial<EquipeRow>) {
-    setEquipes((prev) =>
-      prev.map((e) => (e.id === equipeId ? { ...e, ...patch } : e))
-    );
-    await supabase.from("equipes").update(patch).eq("id", equipeId);
-  }
+  /* ---------- ENREGISTREMENT (unique point d'écriture) ---------- */
+  async function enregistrerEquipe(
+    equipeId: string,
+    draft: DraftEquipe
+  ): Promise<EquipeRow> {
+    const original = equipes.find((e) => e.id === equipeId);
+    if (!original) throw new Error("Équipe introuvable.");
 
-  async function majJoueur(equipeId: string, joueurId: string, nom: string) {
-    setEquipes((prev) =>
-      prev.map((e) =>
-        e.id === equipeId
-          ? { ...e, joueurs: e.joueurs.map((j) => (j.id === joueurId ? { ...j, nom } : j)) }
-          : e
-      )
-    );
-    await supabase.from("joueurs").update({ nom }).eq("id", joueurId);
-  }
+    // Valeurs nettoyées, positions recalculées dans l'ordre affiché
+    const cibles = draft.joueurs.map((j, i) => ({
+      ...j,
+      prenom: txt(j.prenom),
+      nom: txt(j.nom),
+      email: txt(j.email).toLowerCase(),
+      position: i + 1,
+    }));
 
-  async function toggleBoisson(equipeId: string, joueurId: string, boisson: boolean) {
-    setEquipes((prev) =>
-      prev.map((e) =>
-        e.id === equipeId
-          ? {
-              ...e,
-              joueurs: e.joueurs.map((j) =>
-                j.id === joueurId ? { ...j, boisson } : j
-              ),
-            }
-          : e
-      )
-    );
-    await supabase.from("joueurs").update({ boisson }).eq("id", joueurId);
-  }
+    if (txt(draft.nom) === "") throw new Error("Le nom de l'équipe est obligatoire.");
+    if (cibles.some((j) => j.nom === "" && j.prenom === ""))
+      throw new Error("Chaque joueur doit avoir au moins un prénom ou un nom.");
 
-  async function ajouterJoueur(equipeId: string) {
-    const eq = equipes.find((e) => e.id === equipeId);
-    const pos = (eq?.joueurs.length ?? 0) + 1;
-    const { data } = await supabase
-      .from("joueurs")
-      .insert({ equipe_id: equipeId, nom: "", position: pos, paye: false })
-      .select()
-      .single();
-    if (data)
-      setEquipes((prev) =>
-        prev.map((e) =>
-          e.id === equipeId ? { ...e, joueurs: [...e.joueurs, data as any] } : e
-        )
+    // 1) L'équipe
+    const { error: errEquipe } = await supabase
+      .from("equipes")
+      .update({
+        nom: txt(draft.nom),
+        contact_prenom: txt(draft.contact_prenom) || null,
+        contact_nom: txt(draft.contact_nom) || null,
+        contact_telephone: txt(draft.contact_telephone) || null,
+      })
+      .eq("id", equipeId);
+    if (errEquipe) throw new Error(errEquipe.message);
+
+    // 2) Joueurs supprimés
+    const idsGardes = new Set(cibles.filter((j) => !j.estNouveau).map((j) => j.id));
+    const aSupprimer = (original.joueurs ?? [])
+      .map((j) => j.id)
+      .filter((id) => !idsGardes.has(id));
+    if (aSupprimer.length > 0) {
+      const { error } = await supabase
+        .from("joueurs")
+        .delete()
+        .in("id", aSupprimer);
+      if (error) throw new Error(error.message);
+    }
+
+    // 3) Joueurs existants
+    for (const j of cibles.filter((x) => !x.estNouveau)) {
+      const { error } = await supabase
+        .from("joueurs")
+        .update({
+          prenom: j.prenom || null,
+          nom: j.nom,
+          email: j.email || null,
+          paye: j.paye,
+          boisson: j.boisson,
+          position: j.position,
+        })
+        .eq("id", j.id);
+      if (error) throw new Error(error.message);
+    }
+
+    // 4) Nouveaux joueurs
+    const nouveaux = cibles.filter((x) => x.estNouveau);
+    if (nouveaux.length > 0) {
+      const { error } = await supabase.from("joueurs").insert(
+        nouveaux.map((j) => ({
+          equipe_id: equipeId,
+          prenom: j.prenom || null,
+          nom: j.nom,
+          email: j.email || null,
+          paye: j.paye,
+          boisson: j.boisson,
+          position: j.position,
+        }))
       );
-  }
+      if (error) throw new Error(error.message);
+    }
 
-  async function supprimerJoueur(equipeId: string, joueurId: string) {
-    setEquipes((prev) =>
-      prev.map((e) =>
-        e.id === equipeId
-          ? { ...e, joueurs: e.joueurs.filter((j) => j.id !== joueurId) }
-          : e
-      )
+    // 5) VÉRIFICATION : on relit la base et on compare
+    const { data: frais, error: errRelecture } = await supabase
+      .from("equipes")
+      .select("*, joueurs(*)")
+      .eq("id", equipeId)
+      .single();
+    if (errRelecture || !frais)
+      throw new Error(
+        "Enregistrement envoyé mais impossible de vérifier. Rechargez la page."
+      );
+
+    const fresh = frais as EquipeRow;
+    const joueursFrais = [...(fresh.joueurs ?? [])].sort(
+      (a, b) => (a.position ?? 0) - (b.position ?? 0)
     );
-    await supabase.from("joueurs").delete().eq("id", joueurId);
+
+    const equipeOk =
+      txt(fresh.nom) === txt(draft.nom) &&
+      txt(fresh.contact_prenom) === txt(draft.contact_prenom) &&
+      txt(fresh.contact_nom) === txt(draft.contact_nom) &&
+      txt(fresh.contact_telephone) === txt(draft.contact_telephone);
+
+    const joueursOk =
+      joueursFrais.length === cibles.length &&
+      cibles.every((j, i) => {
+        const f = joueursFrais[i];
+        return (
+          f &&
+          txt(f.prenom) === j.prenom &&
+          txt(f.nom) === j.nom &&
+          txt(f.email).toLowerCase() === j.email &&
+          f.paye === j.paye &&
+          f.boisson === j.boisson
+        );
+      });
+
+    if (!equipeOk || !joueursOk)
+      throw new Error(
+        "Les données enregistrées ne correspondent pas. Rien n'a été confirmé — réessayez."
+      );
+
+    // 6) On synchronise l'affichage avec la base
+    const majFresh: EquipeRow = { ...fresh, joueurs: joueursFrais };
+    setEquipes((prev) =>
+      prev.map((e) => (e.id === equipeId ? majFresh : e))
+    );
+    return majFresh;
   }
 
-  // Promouvoir une équipe de la liste d'attente vers les équipes inscrites.
+  // Actions immédiates et explicites (hors édition de champs)
   async function promouvoir(equipeId: string) {
-    setEquipes((prev) =>
-      prev.map((e) => (e.id === equipeId ? { ...e, liste_attente: false } : e))
-    );
-    await supabase
+    const { error } = await supabase
       .from("equipes")
       .update({ liste_attente: false })
       .eq("id", equipeId);
+    if (error) {
+      alert("Impossible de promouvoir cette équipe : " + error.message);
+      return;
+    }
+    setEquipes((prev) =>
+      prev.map((e) => (e.id === equipeId ? { ...e, liste_attente: false } : e))
+    );
   }
 
   async function ajouterEquipe(
     nom: string,
-    joueurs: string[],
+    joueurs: { prenom: string; nom: string; email: string }[],
     contact: { nom: string; prenom: string; tel: string }
   ) {
     const { data, error } = await supabase
@@ -655,16 +787,25 @@ function EquipesTab({
       .select("id")
       .single();
     if (error || !data) {
-      alert("Erreur lors de l'ajout.");
+      alert("Erreur lors de l'ajout : " + (error?.message ?? ""));
       return;
     }
-    const rows = joueurs.map((n, i) => ({
+    const rows = joueurs.map((j, i) => ({
       equipe_id: data.id,
-      nom: n,
+      prenom: j.prenom || null,
+      nom: j.nom,
+      email: j.email || null,
       position: i + 1,
       paye: false,
+      boisson: false,
     }));
-    const { data: js } = await supabase.from("joueurs").insert(rows).select();
+    const { data: js, error: errJ } = await supabase
+      .from("joueurs")
+      .insert(rows)
+      .select();
+    if (errJ) {
+      alert("Équipe créée, mais erreur sur les joueurs : " + errJ.message);
+    }
     setEquipes((prev) => [
       ...prev,
       {
@@ -675,6 +816,7 @@ function EquipesTab({
         contact_prenom: contact.prenom || null,
         contact_telephone: contact.tel || null,
         liste_attente: false,
+        vigilance: false,
         montant_historique: null,
         created_at: new Date().toISOString(),
         joueurs: (js as any[]) ?? [],
@@ -683,16 +825,7 @@ function EquipesTab({
     setAjout(false);
   }
 
-  const cardProps = {
-    tarif,
-    majEquipe,
-    majJoueur,
-    toggleBoisson,
-    onToggleJoueur,
-    ajouterJoueur,
-    supprimerJoueur,
-    onSupprimer,
-  };
+  const cardProps = { tarif, enregistrerEquipe, onSupprimer };
 
   return (
     <div>
@@ -765,18 +898,13 @@ function EquipesTab({
   );
 }
 
-/* Carte d'une équipe (inscrite ou en liste d'attente), entièrement éditable. */
+/* Carte d'une équipe : édition locale, puis enregistrement explicite. */
 function CarteEquipe({
   e,
   tarif,
   expanded,
   onToggleExpand,
-  majEquipe,
-  majJoueur,
-  toggleBoisson,
-  onToggleJoueur,
-  ajouterJoueur,
-  supprimerJoueur,
+  enregistrerEquipe,
   onSupprimer,
   rang,
   onPromouvoir,
@@ -785,24 +913,90 @@ function CarteEquipe({
   tarif: number;
   expanded: boolean;
   onToggleExpand: () => void;
-  majEquipe: (id: string, patch: Partial<EquipeRow>) => void;
-  majJoueur: (equipeId: string, joueurId: string, nom: string) => void;
-  toggleBoisson: (equipeId: string, joueurId: string, v: boolean) => void;
-  onToggleJoueur: (equipeId: string, joueurId: string, v: boolean) => void;
-  ajouterJoueur: (equipeId: string) => void;
-  supprimerJoueur: (equipeId: string, joueurId: string) => void;
+  enregistrerEquipe: (id: string, draft: DraftEquipe) => Promise<EquipeRow>;
   onSupprimer: (id: string) => void;
   rang?: number;
   onPromouvoir?: () => void;
 }) {
+  const [draft, setDraft] = useState<DraftEquipe>(() => draftDepuis(e));
+  const [enCours, setEnCours] = useState(false);
+  const [succes, setSucces] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+
+  const modifie = !draftIdentique(draft, e);
+
+  // Aperçu live basé sur le brouillon
   const eq: Equipe = {
     id: e.id,
-    nom: e.nom,
-    joueurs: e.joueurs.map((j) => ({ nom: j.nom, paye: j.paye })),
+    nom: draft.nom,
+    joueurs: draft.joueurs.map((j) => ({
+      nom: `${j.prenom} ${j.nom}`.trim(),
+      paye: j.paye,
+    })),
   };
   const st = statutEquipe(eq);
+
+  function setChampEquipe(champ: keyof DraftEquipe, v: string) {
+    setSucces(false);
+    setDraft((d) => ({ ...d, [champ]: v }));
+  }
+  function setChampJoueur(
+    id: string,
+    champ: keyof DraftJoueur,
+    v: string | boolean
+  ) {
+    setSucces(false);
+    setDraft((d) => ({
+      ...d,
+      joueurs: d.joueurs.map((j) => (j.id === id ? { ...j, [champ]: v } : j)),
+    }));
+  }
+  function ajouterJoueur() {
+    setSucces(false);
+    setDraft((d) => ({
+      ...d,
+      joueurs: [
+        ...d.joueurs,
+        {
+          id: `new-${Math.random().toString(36).slice(2)}`,
+          estNouveau: true,
+          prenom: "",
+          nom: "",
+          email: "",
+          paye: false,
+          boisson: false,
+        },
+      ],
+    }));
+  }
+  function retirerJoueur(id: string) {
+    setSucces(false);
+    setDraft((d) => ({ ...d, joueurs: d.joueurs.filter((j) => j.id !== id) }));
+  }
+  function annuler() {
+    setDraft(draftDepuis(e));
+    setErreur(null);
+    setSucces(false);
+  }
+
+  async function enregistrer() {
+    setEnCours(true);
+    setErreur(null);
+    setSucces(false);
+    try {
+      const fresh = await enregistrerEquipe(e.id, draft);
+      setDraft(draftDepuis(fresh));
+      setSucces(true);
+      setTimeout(() => setSucces(false), 4000);
+    } catch (err: any) {
+      setErreur(err?.message || "Échec de l'enregistrement. Réessayez.");
+    } finally {
+      setEnCours(false);
+    }
+  }
+
   return (
-    <div className="card overflow-hidden">
+    <div className={`card overflow-hidden ${modifie ? "ring-1 ring-encre" : ""}`}>
       <button
         onClick={onToggleExpand}
         className="flex w-full items-center gap-3 p-4 text-left transition hover:bg-nuage"
@@ -821,13 +1015,25 @@ function CarteEquipe({
           />
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-encre">{e.nom}</div>
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium text-encre">{draft.nom}</span>
+            {e.vigilance && (
+              <span className="chip shrink-0 bg-partiel/15 text-[#B26A00]">
+                ⚠️ Vigilance
+              </span>
+            )}
+            {modifie && (
+              <span className="chip shrink-0 bg-anthracite text-white">
+                Non enregistré
+              </span>
+            )}
+          </div>
           <div className="text-xs text-ardoise">
-            {e.joueurs.length} joueur{e.joueurs.length > 1 ? "s" : ""} ·{" "}
+            {draft.joueurs.length} joueur{draft.joueurs.length > 1 ? "s" : ""} ·{" "}
             {formatEuro(montantPaye(eq, tarif))} / {formatEuro(montantDu(eq, tarif))} · 🥤{" "}
-            {e.joueurs.filter((j) => j.boisson).length}/{e.joueurs.length}
-            {e.contact_prenom || e.contact_nom
-              ? ` · ${e.contact_prenom ?? ""} ${e.contact_nom ?? ""}`.trimEnd()
+            {draft.joueurs.filter((j) => j.boisson).length}/{draft.joueurs.length}
+            {draft.contact_prenom || draft.contact_nom
+              ? ` · ${draft.contact_prenom} ${draft.contact_nom}`.trimEnd()
               : ""}
           </div>
         </div>
@@ -847,11 +1053,8 @@ function CarteEquipe({
             <label className="label">Nom de l&apos;équipe</label>
             <input
               className="input"
-              defaultValue={e.nom}
-              onBlur={(ev) => {
-                const v = ev.target.value.trim();
-                if (v && v !== e.nom) majEquipe(e.id, { nom: v });
-              }}
+              value={draft.nom}
+              onChange={(ev) => setChampEquipe("nom", ev.target.value)}
             />
           </div>
 
@@ -861,76 +1064,98 @@ function CarteEquipe({
               <input
                 className="input"
                 placeholder="Prénom"
-                defaultValue={e.contact_prenom ?? ""}
-                onBlur={(ev) =>
-                  majEquipe(e.id, { contact_prenom: ev.target.value.trim() })
+                value={draft.contact_prenom}
+                onChange={(ev) =>
+                  setChampEquipe("contact_prenom", ev.target.value)
                 }
               />
               <input
                 className="input"
                 placeholder="Nom"
-                defaultValue={e.contact_nom ?? ""}
-                onBlur={(ev) =>
-                  majEquipe(e.id, { contact_nom: ev.target.value.trim() })
-                }
+                value={draft.contact_nom}
+                onChange={(ev) => setChampEquipe("contact_nom", ev.target.value)}
               />
               <input
                 className="input"
                 type="tel"
                 placeholder="Téléphone"
-                defaultValue={e.contact_telephone ?? ""}
-                onBlur={(ev) =>
-                  majEquipe(e.id, { contact_telephone: ev.target.value.trim() })
+                value={draft.contact_telephone}
+                onChange={(ev) =>
+                  setChampEquipe("contact_telephone", ev.target.value)
                 }
               />
             </div>
           </div>
 
           <label className="label">Joueurs, paiement &amp; boisson</label>
-          <div className="space-y-2">
-            {e.joueurs.map((j) => (
-              <div key={j.id} className="flex flex-wrap items-center gap-2">
-                <input
-                  className="input min-w-[150px] flex-1"
-                  placeholder="Nom du joueur"
-                  defaultValue={j.nom}
-                  onBlur={(ev) => {
-                    const v = ev.target.value.trim();
-                    if (v !== j.nom) majJoueur(e.id, j.id, v);
-                  }}
-                />
-                <TogglePill
-                  checked={j.paye}
-                  onChange={(v) => onToggleJoueur(e.id, j.id, v)}
-                  label="Payé"
-                  tone="paye"
-                />
-                <TogglePill
-                  checked={j.boisson}
-                  onChange={(v) => toggleBoisson(e.id, j.id, v)}
-                  label="🥤 Boisson"
-                  tone="dark"
-                />
-                <button
-                  className="btn-ghost px-3 text-nonpaye disabled:opacity-30"
-                  onClick={() => supprimerJoueur(e.id, j.id)}
-                  disabled={e.joueurs.length <= 1}
-                  aria-label="Retirer le joueur"
-                >
-                  ✕
-                </button>
+          <div className="space-y-3">
+            {draft.joueurs.map((j, i) => (
+              <div
+                key={j.id}
+                className="rounded-xl border border-brume bg-nuage/40 p-3"
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-ardoise">
+                    Joueur {i + 1}
+                    {j.estNouveau && " · nouveau"}
+                  </span>
+                  <button
+                    className="text-xs text-nonpaye hover:underline disabled:opacity-30"
+                    onClick={() => retirerJoueur(j.id)}
+                    disabled={draft.joueurs.length <= 1}
+                  >
+                    Retirer
+                  </button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <input
+                    className="input"
+                    placeholder="Prénom"
+                    value={j.prenom}
+                    onChange={(ev) =>
+                      setChampJoueur(j.id, "prenom", ev.target.value)
+                    }
+                  />
+                  <input
+                    className="input"
+                    placeholder="Nom"
+                    value={j.nom}
+                    onChange={(ev) => setChampJoueur(j.id, "nom", ev.target.value)}
+                  />
+                  <input
+                    className="input"
+                    type="email"
+                    placeholder="Adresse e-mail"
+                    value={j.email}
+                    onChange={(ev) =>
+                      setChampJoueur(j.id, "email", ev.target.value)
+                    }
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <TogglePill
+                    checked={j.paye}
+                    onChange={(v) => setChampJoueur(j.id, "paye", v)}
+                    label="Payé"
+                    tone="paye"
+                  />
+                  <TogglePill
+                    checked={j.boisson}
+                    onChange={(v) => setChampJoueur(j.id, "boisson", v)}
+                    label="🥤 Boisson"
+                    tone="dark"
+                  />
+                </div>
               </div>
             ))}
           </div>
-          <button
-            className="btn-ghost mt-2 text-sm"
-            onClick={() => ajouterJoueur(e.id)}
-          >
+          <button className="btn-ghost mt-2 text-sm" onClick={ajouterJoueur}>
             + Ajouter un joueur
           </button>
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-brume pt-3 text-sm">
-            <div className="text-ardoise">
+          {/* Zone d'enregistrement */}
+          <div className="mt-5 border-t border-brume pt-4">
+            <div className="mb-3 text-sm text-ardoise">
               Payé{" "}
               <span className="font-medium text-[#1E8E3E]">
                 {formatEuro(montantPaye(eq, tarif))}
@@ -940,16 +1165,75 @@ function CarteEquipe({
                 {formatEuro(montantRestant(eq, tarif))}
               </span>
             </div>
-            <button
-              className="text-sm text-nonpaye hover:underline"
-              onClick={() => onSupprimer(e.id)}
-            >
-              Supprimer l&apos;équipe
-            </button>
+
+            {erreur && (
+              <p className="mb-3 rounded-xl border border-nonpaye/30 bg-nonpaye/5 px-4 py-2.5 text-sm text-nonpaye">
+                ✕ {erreur}
+              </p>
+            )}
+            {succes && (
+              <p className="mb-3 rounded-xl border border-paye/30 bg-paye/10 px-4 py-2.5 text-sm text-[#1E8E3E]">
+                ✓ Modifications enregistrées et vérifiées en base.
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="btn-primary"
+                onClick={enregistrer}
+                disabled={enCours || !modifie}
+              >
+                {enCours ? (
+                  <>
+                    <Spinner /> Enregistrement…
+                  </>
+                ) : (
+                  "Enregistrer les modifications"
+                )}
+              </button>
+              {modifie && !enCours && (
+                <button className="btn-ghost" onClick={annuler}>
+                  Annuler les modifications
+                </button>
+              )}
+              <div className="flex-1" />
+              <button
+                className="text-sm text-nonpaye hover:underline"
+                onClick={() => onSupprimer(e.id)}
+              >
+                Supprimer l&apos;équipe
+              </button>
+            </div>
+            {!modifie && !succes && !enCours && (
+              <p className="mt-2 text-xs text-ardoise">
+                Aucune modification en attente.
+              </p>
+            )}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="3"
+        opacity="0.25"
+      />
+      <path
+        d="M22 12a10 10 0 0 0-10-10"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -960,7 +1244,7 @@ function AjoutEquipe({
   onCancel: () => void;
   onSave: (
     nom: string,
-    joueurs: string[],
+    joueurs: { prenom: string; nom: string; email: string }[],
     contact: { nom: string; prenom: string; tel: string }
   ) => void;
 }) {
@@ -968,17 +1252,33 @@ function AjoutEquipe({
   const [cNom, setCNom] = useState("");
   const [cPrenom, setCPrenom] = useState("");
   const [cTel, setCTel] = useState("");
-  const [joueurs, setJoueurs] = useState<string[]>(["", "", "", ""]);
-  const nbRemplis = joueurs.filter((j) => j.trim()).length;
-  const ok = nom.trim() !== "" && nbRemplis >= 4;
+  const [joueurs, setJoueurs] = useState<
+    { prenom: string; nom: string; email: string }[]
+  >(
+    Array.from({ length: 4 }, () => ({ prenom: "", nom: "", email: "" }))
+  );
+
+  const complets = joueurs.filter(
+    (j) => j.prenom.trim() !== "" || j.nom.trim() !== ""
+  );
+  const ok = nom.trim() !== "" && complets.length >= 4;
+
+  function setChamp(i: number, champ: "prenom" | "nom" | "email", v: string) {
+    setJoueurs((p) => p.map((x, idx) => (idx === i ? { ...x, [champ]: v } : x)));
+  }
+
   return (
     <div className="card mb-4 p-5">
       <div className="mb-3">
         <label className="label">Nom de l&apos;équipe</label>
-        <input className="input" value={nom} onChange={(e) => setNom(e.target.value)} />
+        <input
+          className="input"
+          value={nom}
+          onChange={(e) => setNom(e.target.value)}
+        />
       </div>
-      <label className="label">Contact référent (optionnel)</label>
-      <div className="mb-3 grid gap-2 sm:grid-cols-3">
+      <label className="label">Contact référent</label>
+      <div className="mb-4 grid gap-2 sm:grid-cols-3">
         <input
           className="input"
           placeholder="Prénom"
@@ -999,25 +1299,41 @@ function AjoutEquipe({
           onChange={(e) => setCTel(e.target.value)}
         />
       </div>
-      <label className="label">Joueurs</label>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <label className="label">
+        Joueurs — prénom et nom requis, e-mail conseillé
+      </label>
+      <div className="space-y-2">
         {joueurs.map((j, i) => (
-          <input
-            key={i}
-            className="input"
-            placeholder={`Joueur ${i + 1}${i < 4 ? " *" : ""}`}
-            value={j}
-            onChange={(e) =>
-              setJoueurs((p) => p.map((x, idx) => (idx === i ? e.target.value : x)))
-            }
-          />
+          <div key={i} className="grid gap-2 sm:grid-cols-3">
+            <input
+              className="input"
+              placeholder={`Prénom ${i + 1}${i < 4 ? " *" : ""}`}
+              value={j.prenom}
+              onChange={(e) => setChamp(i, "prenom", e.target.value)}
+            />
+            <input
+              className="input"
+              placeholder={`Nom ${i + 1}${i < 4 ? " *" : ""}`}
+              value={j.nom}
+              onChange={(e) => setChamp(i, "nom", e.target.value)}
+            />
+            <input
+              className="input"
+              type="email"
+              placeholder="Adresse e-mail"
+              value={j.email}
+              onChange={(e) => setChamp(i, "email", e.target.value)}
+            />
+          </div>
         ))}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {joueurs.length < 8 && (
           <button
             className="btn-ghost"
-            onClick={() => setJoueurs((p) => [...p, ""])}
+            onClick={() =>
+              setJoueurs((p) => [...p, { prenom: "", nom: "", email: "" }])
+            }
           >
             + Joueur
           </button>
@@ -1032,7 +1348,11 @@ function AjoutEquipe({
           onClick={() =>
             onSave(
               nom.trim(),
-              joueurs.map((j) => j.trim()).filter(Boolean),
+              complets.map((j) => ({
+                prenom: j.prenom.trim(),
+                nom: j.nom.trim(),
+                email: j.email.trim().toLowerCase(),
+              })),
               { nom: cNom.trim(), prenom: cPrenom.trim(), tel: cTel.trim() }
             )
           }

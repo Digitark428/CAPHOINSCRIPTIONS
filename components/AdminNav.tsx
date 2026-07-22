@@ -18,6 +18,7 @@ export function AdminNav({ email }: { email: string | null }) {
 
   const links = [
     { href: "/admin", label: "Tournois" },
+    { href: "/admin/vigilance", label: "Vigilance" },
     { href: "/admin/historique", label: "Historique" },
   ];
 

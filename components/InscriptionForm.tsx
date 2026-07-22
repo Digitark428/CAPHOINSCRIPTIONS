@@ -11,11 +11,25 @@ interface Props {
   listeAttente?: boolean;
 }
 
+interface JoueurSaisi {
+  prenom: string;
+  nom: string;
+  email: string;
+}
+
 const ENGAGEMENTS = [
   "Je confirme que mon équipe participera au tournoi.",
   "Je certifie que mon équipe sera présente au tournoi. En cas d'annulation, je m'engage à prévenir l'organisation au plus tard la veille avant 21h00. Toute annulation signalée après 21h00 entraînera la mise en liste d'attente de l'équipe pour le tournoi suivant.",
   "Je m'engage à respecter les horaires d'inscription et à arriver à l'heure sur le site du tournoi.",
 ];
+
+const MESSAGE_VIGILANCE =
+  "Votre inscription a bien été reçue. Cependant, un joueur de votre équipe figure dans notre liste de vigilance suite à une précédente absence non signalée. Afin de garantir la bonne organisation des tournois et l'équité envers toutes les équipes, votre inscription est temporairement placée en liste d'attente. L'organisation prendra contact avec vous si une validation est possible. Merci de votre compréhension.";
+
+const vide = (): JoueurSaisi => ({ prenom: "", nom: "", email: "" });
+const emailValide = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
+const joueurComplet = (j: JoueurSaisi) =>
+  j.prenom.trim() !== "" && j.nom.trim() !== "" && emailValide(j.email);
 
 export function InscriptionForm({
   slug,
@@ -27,13 +41,29 @@ export function InscriptionForm({
   const [contactNom, setContactNom] = useState("");
   const [contactPrenom, setContactPrenom] = useState("");
   const [contactTel, setContactTel] = useState("");
-  const [joueurs, setJoueurs] = useState<string[]>(["", "", "", ""]);
+  const [joueurs, setJoueurs] = useState<JoueurSaisi[]>([
+    vide(),
+    vide(),
+    vide(),
+    vide(),
+  ]);
   const [cases, setCases] = useState<boolean[]>([false, false, false]);
   const [loading, setLoading] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [succes, setSucces] = useState(false);
+  // Renseignés par la réponse du serveur après inscription
+  const [enAttente, setEnAttente] = useState(false);
+  const [vigilance, setVigilance] = useState(false);
 
-  const nbRemplis = joueurs.filter((j) => j.trim() !== "").length;
+  const complets = joueurs.filter(joueurComplet);
+  const nbComplets = complets.length;
+  // Une ligne entamée mais incomplète bloque la validation (évite les oublis)
+  const lignesEntameesInvalides = joueurs.some(
+    (j) =>
+      (j.prenom.trim() !== "" || j.nom.trim() !== "" || j.email.trim() !== "") &&
+      !joueurComplet(j)
+  );
+
   const nomOk = nomEquipe.trim() !== "";
   const contactOk =
     contactNom.trim() !== "" &&
@@ -41,13 +71,20 @@ export function InscriptionForm({
     contactTel.trim() !== "";
   const casesOk = cases.every(Boolean);
   const peutValider =
-    nomOk && contactOk && nbRemplis >= 4 && casesOk && !loading;
+    nomOk &&
+    contactOk &&
+    nbComplets >= 4 &&
+    !lignesEntameesInvalides &&
+    casesOk &&
+    !loading;
 
-  function setJoueur(i: number, v: string) {
-    setJoueurs((prev) => prev.map((j, idx) => (idx === i ? v : j)));
+  function setChamp(i: number, champ: keyof JoueurSaisi, v: string) {
+    setJoueurs((prev) =>
+      prev.map((j, idx) => (idx === i ? { ...j, [champ]: v } : j))
+    );
   }
   function ajouterJoueur() {
-    if (joueurs.length < 8) setJoueurs((prev) => [...prev, ""]);
+    if (joueurs.length < 8) setJoueurs((prev) => [...prev, vide()]);
   }
   function retirerJoueur(i: number) {
     if (joueurs.length > 4)
@@ -62,10 +99,14 @@ export function InscriptionForm({
     if (!peutValider) return;
     setLoading(true);
     const supabase = createClient();
-    const { error } = await supabase.rpc("inscrire_equipe", {
+    const { data, error } = await supabase.rpc("inscrire_equipe", {
       p_slug: slug,
       p_nom_equipe: nomEquipe.trim(),
-      p_joueurs: joueurs.map((j) => j.trim()).filter(Boolean),
+      p_joueurs: complets.map((j) => ({
+        prenom: j.prenom.trim(),
+        nom: j.nom.trim(),
+        email: j.email.trim().toLowerCase(),
+      })),
       p_contact_nom: contactNom.trim(),
       p_contact_prenom: contactPrenom.trim(),
       p_contact_telephone: contactTel.trim(),
@@ -76,6 +117,12 @@ export function InscriptionForm({
       setErreur(error.message || "Une erreur est survenue. Réessayez.");
       return;
     }
+    const res = (data ?? {}) as {
+      liste_attente?: boolean;
+      vigilance?: boolean;
+    };
+    setEnAttente(Boolean(res.liste_attente ?? listeAttente));
+    setVigilance(Boolean(res.vigilance));
     setSucces(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -95,24 +142,32 @@ export function InscriptionForm({
           </svg>
         </div>
         <h2 className="display text-2xl font-semibold text-encre">
-          {listeAttente ? "Équipe en liste d'attente" : "Équipe inscrite"}
+          {enAttente ? "Inscription en liste d'attente" : "Équipe inscrite"}
         </h2>
-        <p className="mt-2 text-ardoise">
-          {listeAttente
-            ? `« ${nomEquipe.trim()} » est enregistrée en liste d'attente. Si une place se libère, l'organisation vous contactera dans l'ordre d'inscription.`
-            : `« ${nomEquipe.trim()} » est bien enregistrée. Rendez-vous sur le sable.`}
-        </p>
+
+        {vigilance ? (
+          <p className="mx-auto mt-3 max-w-md text-left text-sm leading-relaxed text-ardoise">
+            {MESSAGE_VIGILANCE}
+          </p>
+        ) : (
+          <p className="mt-2 text-ardoise">
+            {enAttente
+              ? `« ${nomEquipe.trim()} » est enregistrée en liste d'attente. Si une place se libère, l'organisation vous contactera dans l'ordre d'inscription.`
+              : `« ${nomEquipe.trim()} » est bien enregistrée. Rendez-vous sur le sable.`}
+          </p>
+        )}
+
         <div className="mx-auto mt-6 max-w-sm rounded-2xl bg-nuage p-5 text-left">
           <div className="flex items-center justify-between">
             <span className="text-sm text-ardoise">
-              {listeAttente ? "À régler si une place se libère" : "À régler sur place"}
+              {enAttente ? "À régler si une place se libère" : "À régler sur place"}
             </span>
             <span className="display text-lg font-semibold text-encre">
-              {formatEuro(nbRemplis * tarifParJoueur)}
+              {formatEuro(nbComplets * tarifParJoueur)}
             </span>
           </div>
           <p className="mt-1 text-xs text-ardoise">
-            {nbRemplis} joueurs × {formatEuro(tarifParJoueur)} · carte bancaire
+            {nbComplets} joueurs × {formatEuro(tarifParJoueur)} · carte bancaire
             ou espèces, le jour du tournoi.
           </p>
         </div>
@@ -203,45 +258,101 @@ export function InscriptionForm({
         </div>
       </section>
 
-      {/* Joueurs */}
+      {/* Joueurs — prénom, nom, e-mail */}
       <section className="card p-6 sm:p-7">
         <h2 className="display mb-1 text-lg font-semibold text-encre">
           Joueurs
         </h2>
         <p className="mb-4 text-sm text-ardoise">
-          Minimum 4, maximum 8 joueurs.
+          Minimum 4, maximum 8 joueurs. Prénom, nom et adresse e-mail sont
+          obligatoires pour chaque joueur.
         </p>
-        <div className="space-y-3">
+        <div className="space-y-5">
           {joueurs.map((j, i) => {
             const obligatoire = i < 4;
+            const entamee =
+              j.prenom.trim() !== "" ||
+              j.nom.trim() !== "" ||
+              j.email.trim() !== "";
+            const mailInvalide = j.email.trim() !== "" && !emailValide(j.email);
             return (
-              <div key={i}>
-                <label className="label" htmlFor={`joueur-${i}`}>
-                  Joueur {i + 1}{" "}
-                  {obligatoire ? (
-                    <Req />
-                  ) : (
-                    <span className="text-ardoise/60">(optionnel)</span>
-                  )}
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id={`joueur-${i}`}
-                    className="input"
-                    placeholder={`Prénom Nom`}
-                    value={j}
-                    onChange={(e) => setJoueur(i, e.target.value)}
-                    maxLength={80}
-                  />
+              <div
+                key={i}
+                className="rounded-xl border border-brume bg-nuage/40 p-4"
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-sm font-medium text-encre">
+                    Joueur {i + 1}{" "}
+                    {obligatoire ? (
+                      <Req />
+                    ) : (
+                      <span className="font-normal text-ardoise/70">
+                        (optionnel)
+                      </span>
+                    )}
+                  </span>
                   {!obligatoire && (
                     <button
                       type="button"
                       onClick={() => retirerJoueur(i)}
-                      className="btn-ghost px-3"
-                      aria-label={`Retirer le joueur ${i + 1}`}
+                      className="text-sm text-nonpaye hover:underline"
                     >
-                      ✕
+                      Retirer
                     </button>
+                  )}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="label" htmlFor={`j-prenom-${i}`}>
+                      Prénom <Req />
+                    </label>
+                    <input
+                      id={`j-prenom-${i}`}
+                      className="input"
+                      placeholder="Prénom"
+                      value={j.prenom}
+                      onChange={(e) => setChamp(i, "prenom", e.target.value)}
+                      maxLength={60}
+                    />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor={`j-nom-${i}`}>
+                      Nom <Req />
+                    </label>
+                    <input
+                      id={`j-nom-${i}`}
+                      className="input"
+                      placeholder="Nom"
+                      value={j.nom}
+                      onChange={(e) => setChamp(i, "nom", e.target.value)}
+                      maxLength={60}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <label className="label" htmlFor={`j-email-${i}`}>
+                    Adresse e-mail <Req />
+                  </label>
+                  <input
+                    id={`j-email-${i}`}
+                    type="email"
+                    inputMode="email"
+                    autoComplete="off"
+                    className="input"
+                    placeholder="prenom.nom@exemple.com"
+                    value={j.email}
+                    onChange={(e) => setChamp(i, "email", e.target.value)}
+                    maxLength={120}
+                  />
+                  {mailInvalide && (
+                    <p className="mt-1 text-xs text-nonpaye">
+                      Adresse e-mail invalide.
+                    </p>
+                  )}
+                  {entamee && !mailInvalide && !joueurComplet(j) && (
+                    <p className="mt-1 text-xs text-ardoise">
+                      Complétez prénom, nom et e-mail pour ce joueur.
+                    </p>
                   )}
                 </div>
               </div>
@@ -264,11 +375,11 @@ export function InscriptionForm({
         <div className="flex items-center justify-between">
           <span className="text-ardoise">Montant de l&apos;inscription</span>
           <span className="display text-2xl font-semibold text-encre">
-            {formatEuro(nbRemplis * tarifParJoueur)}
+            {formatEuro(nbComplets * tarifParJoueur)}
           </span>
         </div>
         <p className="mt-1 text-sm text-ardoise">
-          {nbRemplis} joueur{nbRemplis > 1 ? "s" : ""} ×{" "}
+          {nbComplets} joueur{nbComplets > 1 ? "s" : ""} ×{" "}
           {formatEuro(tarifParJoueur)}
         </p>
         <div className="mt-4 rounded-2xl bg-nuage p-4">
@@ -282,7 +393,7 @@ export function InscriptionForm({
         </div>
       </section>
 
-      {/* Encart d'engagement — très visible (anthracite) */}
+      {/* Encart d'engagement */}
       <section className="rounded-2xl bg-anthracite p-6 text-white sm:p-7">
         <p className="display text-base font-semibold">
           ⚠️ Merci de ne pas inscrire de fausses équipes.
@@ -319,8 +430,7 @@ export function InscriptionForm({
           </li>
           <li className="flex gap-3">
             <Puce />
-            Le tournoi débute à{" "}
-            <b className="font-medium text-encre">8h30</b>.
+            Le tournoi débute à <b className="font-medium text-encre">8h30</b>.
           </li>
           <li className="flex gap-3">
             <Puce />
@@ -385,11 +495,13 @@ export function InscriptionForm({
             ? "Renseignez le nom de l'équipe."
             : !contactOk
               ? "Renseignez le contact référent (prénom, nom, téléphone)."
-              : nbRemplis < 4
-                ? `Ajoutez au moins ${4 - nbRemplis} joueur${
-                    4 - nbRemplis > 1 ? "s" : ""
-                  } de plus.`
-                : "Cochez les trois engagements pour valider."}
+              : lignesEntameesInvalides
+                ? "Complétez (ou retirez) les joueurs commencés : prénom, nom et e-mail."
+                : nbComplets < 4
+                  ? `Complétez au moins ${4 - nbComplets} joueur${
+                      4 - nbComplets > 1 ? "s" : ""
+                    } de plus.`
+                  : "Cochez les trois engagements pour valider."}
         </p>
       )}
     </div>

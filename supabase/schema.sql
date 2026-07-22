@@ -1,16 +1,15 @@
 -- ============================================================
---  CAP HOMARD BEACH VOLLEY 974 — BASE DE DONNÉES (installation)
+--  CAP HOMARD BEACH VOLLEY 974 — BASE DE DONNÉES
 --
---  👉 UN SEUL FICHIER À LANCER, une fois, sur ton NOUVEAU projet Supabase.
---     Supabase > SQL Editor > New query > coller tout > Run.
+--  👉 UN SEUL FICHIER. Supabase > SQL Editor > New query > coller > Run.
 --
---  Crée tout ce qu'il faut : tables, sécurité (RLS), stockage des
---  affiches, et toutes les fonctions (inscription, liste d'attente…).
---  Aucune donnée n'est insérée : tu démarres avec une base VIDE.
---  Ré-exécutable sans risque (aucune erreur « existe déjà »).
+--  ✅ Ré-exécutable autant de fois que tu veux, SANS RISQUE :
+--     - ne supprime jamais de données (tournois, équipes, joueurs…)
+--     - ajoute les nouveautés si elles manquent
+--     - aucune erreur « existe déjà »
 --
---  Ensuite, dans Supabase : Authentication > Users > Add user,
---  pour créer ton compte organisateur (connexion à /login).
+--  Ensuite : Authentication > Users > Add user pour créer ton
+--  compte organisateur (connexion à /login).
 -- ============================================================
 
 create extension if not exists "pgcrypto";
@@ -29,7 +28,7 @@ create table if not exists public.tournois (
   statut                  text not null default 'ouvert',
   is_historique           boolean not null default false,
   image_url               text,
-  max_equipes             int,                               -- limite de places (équipes) ; null = illimité
+  max_equipes             int,
   rentree_buvette         numeric(12,2) not null default 0,
   depense_buvette         numeric(12,2) not null default 0,
   rentree_inscriptions_manuelle numeric(12,2),
@@ -44,7 +43,8 @@ create table if not exists public.equipes (
   contact_nom        text,
   contact_prenom     text,
   contact_telephone  text,
-  liste_attente      boolean not null default false,   -- true = équipe en liste d'attente
+  liste_attente      boolean not null default false,
+  vigilance          boolean not null default false,   -- signalée par la liste de vigilance
   montant_historique numeric(12,2),
   created_at         timestamptz not null default now()
 );
@@ -53,12 +53,25 @@ create index if not exists idx_equipes_tournoi on public.equipes(tournoi_id);
 create table if not exists public.joueurs (
   id         uuid primary key default gen_random_uuid(),
   equipe_id  uuid not null references public.equipes(id) on delete cascade,
+  prenom     text,
   nom        text not null,
+  email      text,
   paye       boolean not null default false,
   boisson    boolean not null default false,
   position   int not null default 1
 );
 create index if not exists idx_joueurs_equipe on public.joueurs(equipe_id);
+
+-- LISTE DE VIGILANCE ----------------------------------------
+create table if not exists public.liste_vigilance (
+  id                uuid primary key default gen_random_uuid(),
+  prenom            text not null,
+  nom               text not null,
+  motif             text not null default '',
+  date_signalement  date not null default current_date,
+  actif             boolean not null default true,
+  created_at        timestamptz not null default now()
+);
 
 create table if not exists public.achats_divers (
   id          uuid primary key default gen_random_uuid(),
@@ -78,6 +91,13 @@ create table if not exists public.frais_association (
   position    int not null default 1
 );
 create index if not exists idx_frais_tournoi on public.frais_association(tournoi_id);
+
+-- ============================================================
+--  MISES À NIVEAU (si la base existait déjà — sans perte)
+-- ============================================================
+alter table public.joueurs  add column if not exists prenom    text;
+alter table public.joueurs  add column if not exists email     text;
+alter table public.equipes  add column if not exists vigilance boolean not null default false;
 
 -- ============================================================
 --  STOCKAGE — Affiches des tournois
@@ -112,20 +132,35 @@ create policy "affiches suppression admin"
 alter table public.tournois          enable row level security;
 alter table public.equipes           enable row level security;
 alter table public.joueurs           enable row level security;
+alter table public.liste_vigilance   enable row level security;
 alter table public.achats_divers     enable row level security;
 alter table public.frais_association enable row level security;
 
-drop policy if exists "admin all tournois"  on public.tournois;
-drop policy if exists "admin all equipes"   on public.equipes;
-drop policy if exists "admin all joueurs"   on public.joueurs;
-drop policy if exists "admin all achats"    on public.achats_divers;
-drop policy if exists "admin all frais"     on public.frais_association;
+drop policy if exists "admin all tournois"   on public.tournois;
+drop policy if exists "admin all equipes"    on public.equipes;
+drop policy if exists "admin all joueurs"    on public.joueurs;
+drop policy if exists "admin all vigilance"  on public.liste_vigilance;
+drop policy if exists "admin all achats"     on public.achats_divers;
+drop policy if exists "admin all frais"      on public.frais_association;
 
-create policy "admin all tournois"  on public.tournois          for all to authenticated using (true) with check (true);
-create policy "admin all equipes"   on public.equipes           for all to authenticated using (true) with check (true);
-create policy "admin all joueurs"   on public.joueurs           for all to authenticated using (true) with check (true);
-create policy "admin all achats"    on public.achats_divers     for all to authenticated using (true) with check (true);
-create policy "admin all frais"     on public.frais_association for all to authenticated using (true) with check (true);
+create policy "admin all tournois"   on public.tournois          for all to authenticated using (true) with check (true);
+create policy "admin all equipes"    on public.equipes           for all to authenticated using (true) with check (true);
+create policy "admin all joueurs"    on public.joueurs           for all to authenticated using (true) with check (true);
+create policy "admin all vigilance"  on public.liste_vigilance   for all to authenticated using (true) with check (true);
+create policy "admin all achats"     on public.achats_divers     for all to authenticated using (true) with check (true);
+create policy "admin all frais"      on public.frais_association for all to authenticated using (true) with check (true);
+
+-- ============================================================
+--  OUTIL — comparaison insensible aux accents et à la casse
+-- ============================================================
+create or replace function public.normaliser_nom(p text)
+returns text
+language sql immutable
+as $$
+  select lower(btrim(translate(coalesce(p, ''),
+    'ÀÁÂÃÄÅàáâãäåÈÉÊËèéêëÌÍÎÏìíîïÒÓÔÕÖØòóôõöøÙÚÛÜùúûüÝýÿÑñÇç',
+    'AAAAAAaaaaaaEEEEeeeeIIIIiiiiOOOOOOooooooUUUUuuuuYyyNnCc')));
+$$;
 
 -- ============================================================
 --  FONCTIONS PUBLIQUES (RPC)
@@ -166,28 +201,35 @@ as $$
   limit 1;
 $$;
 
+-- Inscription d'une équipe.
+--  p_joueurs : tableau JSON [{"prenom":"…","nom":"…","email":"…"}, …]
+--  Retourne  : {"equipe_id":…, "liste_attente":bool, "vigilance":bool}
 drop function if exists public.inscrire_equipe(text, text, text[]);
 drop function if exists public.inscrire_equipe(text, text, text[], text, text, text);
 drop function if exists public.inscrire_equipe(text, text, text[], text, text, text, boolean);
-create or replace function public.inscrire_equipe(
+drop function if exists public.inscrire_equipe(text, text, jsonb, text, text, text, boolean);
+
+create function public.inscrire_equipe(
   p_slug              text,
   p_nom_equipe        text,
-  p_joueurs           text[],
+  p_joueurs           jsonb,
   p_contact_nom       text,
   p_contact_prenom    text,
   p_contact_telephone text,
   p_liste_attente     boolean default false
 )
-returns uuid
+returns jsonb
 language plpgsql security definer set search_path = public
 as $$
 declare
-  v_tournoi   public.tournois%rowtype;
-  v_equipe_id uuid;
-  v_nom       text;
-  v_pos       int := 0;
-  v_count     int;
-  v_nb        int;
+  v_tournoi    public.tournois%rowtype;
+  v_equipe_id  uuid;
+  v_j          jsonb;
+  v_pos        int := 0;
+  v_count      int;
+  v_nb         int;
+  v_vigilance  boolean := false;
+  v_attente    boolean;
 begin
   select * into v_tournoi from public.tournois where slug = p_slug limit 1 for update;
   if not found then
@@ -197,25 +239,7 @@ begin
     raise exception 'Les inscriptions pour ce tournoi sont fermées';
   end if;
 
-  if not p_liste_attente and v_tournoi.max_equipes is not null then
-    select count(*) into v_nb
-    from public.equipes
-    where tournoi_id = v_tournoi.id and liste_attente = false;
-    if v_nb >= v_tournoi.max_equipes then
-      raise exception 'Le tournoi est complet';
-    end if;
-  end if;
-
-  select count(*) into v_count
-  from unnest(p_joueurs) j
-  where btrim(coalesce(j, '')) <> '';
-
-  if v_count < 4 then
-    raise exception 'Minimum 4 joueurs requis';
-  end if;
-  if v_count > 8 then
-    raise exception 'Maximum 8 joueurs autorisés';
-  end if;
+  -- Validations de base
   if btrim(coalesce(p_nom_equipe, '')) = '' then
     raise exception 'Le nom de l''équipe est obligatoire';
   end if;
@@ -225,26 +249,73 @@ begin
     raise exception 'Le contact (nom, prénom, téléphone) est obligatoire';
   end if;
 
+  -- Joueurs complets : prénom + nom + e-mail
+  select count(*) into v_count
+  from jsonb_array_elements(coalesce(p_joueurs, '[]'::jsonb)) j
+  where btrim(coalesce(j->>'prenom', '')) <> ''
+    and btrim(coalesce(j->>'nom', ''))    <> ''
+    and btrim(coalesce(j->>'email', ''))  <> '';
+
+  if v_count < 4 then
+    raise exception 'Minimum 4 joueurs requis (prénom, nom et e-mail obligatoires)';
+  end if;
+  if v_count > 8 then
+    raise exception 'Maximum 8 joueurs autorisés';
+  end if;
+
+  -- LISTE DE VIGILANCE : un joueur signalé => liste d'attente automatique
+  select exists (
+    select 1
+    from jsonb_array_elements(coalesce(p_joueurs, '[]'::jsonb)) j
+    join public.liste_vigilance v
+      on v.actif = true
+     and public.normaliser_nom(v.prenom) = public.normaliser_nom(j->>'prenom')
+     and public.normaliser_nom(v.nom)    = public.normaliser_nom(j->>'nom')
+  ) into v_vigilance;
+
+  v_attente := coalesce(p_liste_attente, false) or v_vigilance;
+
+  -- Limite de places : seulement pour une inscription officielle
+  if not v_attente and v_tournoi.max_equipes is not null then
+    select count(*) into v_nb
+    from public.equipes
+    where tournoi_id = v_tournoi.id and liste_attente = false;
+    if v_nb >= v_tournoi.max_equipes then
+      raise exception 'Le tournoi est complet';
+    end if;
+  end if;
+
   insert into public.equipes
-    (tournoi_id, nom, contact_nom, contact_prenom, contact_telephone, liste_attente)
+    (tournoi_id, nom, contact_nom, contact_prenom, contact_telephone, liste_attente, vigilance)
   values
     (v_tournoi.id, btrim(p_nom_equipe), btrim(p_contact_nom),
-     btrim(p_contact_prenom), btrim(p_contact_telephone), p_liste_attente)
+     btrim(p_contact_prenom), btrim(p_contact_telephone), v_attente, v_vigilance)
   returning id into v_equipe_id;
 
-  foreach v_nom in array p_joueurs loop
-    if btrim(coalesce(v_nom, '')) <> '' then
+  for v_j in select * from jsonb_array_elements(coalesce(p_joueurs, '[]'::jsonb)) loop
+    if btrim(coalesce(v_j->>'prenom', '')) <> ''
+       and btrim(coalesce(v_j->>'nom', '')) <> ''
+       and btrim(coalesce(v_j->>'email', '')) <> '' then
       v_pos := v_pos + 1;
-      insert into public.joueurs (equipe_id, nom, position, paye)
-      values (v_equipe_id, btrim(v_nom), v_pos, false);
+      insert into public.joueurs (equipe_id, prenom, nom, email, position, paye, boisson)
+      values (v_equipe_id,
+              btrim(v_j->>'prenom'),
+              btrim(v_j->>'nom'),
+              btrim(lower(v_j->>'email')),
+              v_pos, false, false);
     end if;
   end loop;
 
-  return v_equipe_id;
+  return jsonb_build_object(
+    'equipe_id',     v_equipe_id,
+    'liste_attente', v_attente,
+    'vigilance',     v_vigilance
+  );
 end;
 $$;
 
 grant execute on function public.tournois_ouverts()            to anon, authenticated;
 grant execute on function public.tournoi_public(text)          to anon, authenticated;
+grant execute on function public.normaliser_nom(text)          to anon, authenticated;
 grant execute on function
-  public.inscrire_equipe(text, text, text[], text, text, text, boolean) to anon, authenticated;
+  public.inscrire_equipe(text, text, jsonb, text, text, text, boolean) to anon, authenticated;

@@ -22,10 +22,31 @@ export interface Tournoi {
 export interface JoueurRow {
   id: string;
   equipe_id: string;
+  prenom: string | null;
   nom: string;
+  email: string | null;
   paye: boolean;
   boisson: boolean;
   position: number;
+}
+
+/** Nom complet affichable d'un joueur (compatible anciennes fiches sans prénom). */
+export function nomComplet(j: {
+  prenom?: string | null;
+  nom?: string | null;
+}): string {
+  return `${j.prenom ?? ""} ${j.nom ?? ""}`.trim();
+}
+
+/** Une personne de la liste de vigilance. */
+export interface VigilanceRow {
+  id: string;
+  prenom: string;
+  nom: string;
+  motif: string;
+  date_signalement: string;
+  actif: boolean;
+  created_at: string;
 }
 
 export interface EquipeRow {
@@ -36,6 +57,7 @@ export interface EquipeRow {
   contact_prenom: string | null;
   contact_telephone: string | null;
   liste_attente: boolean;
+  vigilance: boolean;
   montant_historique: number | null;
   created_at: string;
   joueurs: JoueurRow[];
