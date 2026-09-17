@@ -20,7 +20,14 @@ import {
   statutEquipe,
   type Equipe,
 } from "@/lib/finance";
-import { LIBELLE_TYPE, type EquipeRow, type LigneFinance, type Tournoi } from "@/lib/types";
+import {
+  LIBELLE_TYPE,
+  NB_JOUEURS_PAR_TYPE,
+  type EquipeRow,
+  type LigneFinance,
+  type Tournoi,
+  type TypeTournoi,
+} from "@/lib/types";
 
 type Tab = "apercu" | "equipes" | "finances";
 
@@ -298,6 +305,7 @@ export function TournoiDashboard({
           setEquipes={setEquipes}
           tarif={tarif}
           tournoiId={tournoi.id}
+          typeTournoi={tournoi.type}
           onSupprimer={supprimerEquipe}
         />
       )}
@@ -574,12 +582,14 @@ function EquipesTab({
   setEquipes,
   tarif,
   tournoiId,
+  typeTournoi,
   onSupprimer,
 }: {
   equipes: EquipeRow[];
   setEquipes: React.Dispatch<React.SetStateAction<EquipeRow[]>>;
   tarif: number;
   tournoiId: string;
+  typeTournoi: TypeTournoi;
   onSupprimer: (id: string) => void;
 }) {
   const supabase = createClient();
@@ -842,7 +852,11 @@ function EquipesTab({
       </div>
 
       {ajout && (
-        <AjoutEquipe onCancel={() => setAjout(false)} onSave={ajouterEquipe} />
+        <AjoutEquipe
+          nombreJoueurs={NB_JOUEURS_PAR_TYPE[typeTournoi]}
+          onCancel={() => setAjout(false)}
+          onSave={ajouterEquipe}
+        />
       )}
 
       {/* Équipes inscrites */}
@@ -1238,9 +1252,11 @@ function Spinner() {
 }
 
 function AjoutEquipe({
+  nombreJoueurs,
   onCancel,
   onSave,
 }: {
+  nombreJoueurs: number;
   onCancel: () => void;
   onSave: (
     nom: string,
@@ -1255,13 +1271,17 @@ function AjoutEquipe({
   const [joueurs, setJoueurs] = useState<
     { prenom: string; nom: string; email: string }[]
   >(
-    Array.from({ length: 4 }, () => ({ prenom: "", nom: "", email: "" }))
+    Array.from({ length: nombreJoueurs }, () => ({
+      prenom: "",
+      nom: "",
+      email: "",
+    }))
   );
 
   const complets = joueurs.filter(
     (j) => j.prenom.trim() !== "" || j.nom.trim() !== ""
   );
-  const ok = nom.trim() !== "" && complets.length >= 4;
+  const ok = nom.trim() !== "" && complets.length === nombreJoueurs;
 
   function setChamp(i: number, champ: "prenom" | "nom" | "email", v: string) {
     setJoueurs((p) => p.map((x, idx) => (idx === i ? { ...x, [champ]: v } : x)));
@@ -1300,20 +1320,20 @@ function AjoutEquipe({
         />
       </div>
       <label className="label">
-        Joueurs — prénom et nom requis, e-mail conseillé
+        {nombreJoueurs} joueurs requis — prénom et nom obligatoires, e-mail conseillé
       </label>
       <div className="space-y-2">
         {joueurs.map((j, i) => (
           <div key={i} className="grid gap-2 sm:grid-cols-3">
             <input
               className="input"
-              placeholder={`Prénom ${i + 1}${i < 4 ? " *" : ""}`}
+              placeholder={`Prénom ${i + 1} *`}
               value={j.prenom}
               onChange={(e) => setChamp(i, "prenom", e.target.value)}
             />
             <input
               className="input"
-              placeholder={`Nom ${i + 1}${i < 4 ? " *" : ""}`}
+              placeholder={`Nom ${i + 1} *`}
               value={j.nom}
               onChange={(e) => setChamp(i, "nom", e.target.value)}
             />
@@ -1328,16 +1348,6 @@ function AjoutEquipe({
         ))}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        {joueurs.length < 8 && (
-          <button
-            className="btn-ghost"
-            onClick={() =>
-              setJoueurs((p) => [...p, { prenom: "", nom: "", email: "" }])
-            }
-          >
-            + Joueur
-          </button>
-        )}
         <div className="flex-1" />
         <button className="btn-ghost" onClick={onCancel}>
           Annuler
