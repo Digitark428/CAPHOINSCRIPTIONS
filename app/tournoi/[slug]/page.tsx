@@ -104,6 +104,7 @@ export default async function PageInscription({
         </div>
       ) : complet ? (
         <ListeAttente
+          key={`${tournoi.id}-${tournoi.type}`}
           slug={params.slug}
           tarifParJoueur={Number(tournoi.tarif_par_joueur)}
           typeTournoi={tournoi.type}
@@ -111,6 +112,7 @@ export default async function PageInscription({
         />
       ) : (
         <InscriptionForm
+          key={`${tournoi.id}-${tournoi.type}`}
           slug={params.slug}
           tarifParJoueur={Number(tournoi.tarif_par_joueur)}
           typeTournoi={tournoi.type}
