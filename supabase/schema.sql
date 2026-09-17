@@ -227,6 +227,7 @@ declare
   v_j          jsonb;
   v_pos        int := 0;
   v_count      int;
+  v_joueurs_requis int;
   v_nb         int;
   v_vigilance  boolean := false;
   v_attente    boolean;
@@ -256,11 +257,18 @@ begin
     and btrim(coalesce(j->>'nom', ''))    <> ''
     and btrim(coalesce(j->>'email', ''))  <> '';
 
-  if v_count < 4 then
-    raise exception 'Minimum 4 joueurs requis (prénom, nom et e-mail obligatoires)';
+  v_joueurs_requis := case v_tournoi.type
+    when '4x4' then 4
+    when '3x3' then 3
+    when '2x2' then 2
+    else null
+  end;
+
+  if v_joueurs_requis is null then
+    raise exception 'Format de tournoi non pris en charge';
   end if;
-  if v_count > 8 then
-    raise exception 'Maximum 8 joueurs autorisés';
+  if v_count <> v_joueurs_requis then
+    raise exception 'Ce tournoi exige exactement % joueurs (prénom, nom et e-mail obligatoires)', v_joueurs_requis;
   end if;
 
   -- LISTE DE VIGILANCE : un joueur signalé => liste d'attente automatique

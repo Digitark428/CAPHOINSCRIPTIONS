@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { InscriptionForm } from "@/components/InscriptionForm";
+import type { TypeTournoi } from "@/lib/types";
 
 /**
  * Affiché quand un tournoi est complet : on voit qu'il est plein, l'inscription
@@ -12,10 +13,12 @@ import { InscriptionForm } from "@/components/InscriptionForm";
 export function ListeAttente({
   slug,
   tarifParJoueur,
+  typeTournoi,
   maxEquipes,
 }: {
   slug: string;
   tarifParJoueur: number;
+  typeTournoi: TypeTournoi;
   maxEquipes: number | null;
 }) {
   const [ouvert, setOuvert] = useState(false);
@@ -37,6 +40,7 @@ export function ListeAttente({
         <InscriptionForm
           slug={slug}
           tarifParJoueur={tarifParJoueur}
+          typeTournoi={typeTournoi}
           listeAttente
         />
       </div>

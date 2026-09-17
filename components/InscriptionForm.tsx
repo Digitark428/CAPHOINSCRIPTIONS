@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatEuro } from "@/lib/finance";
+import { NB_JOUEURS_PAR_TYPE, type TypeTournoi } from "@/lib/types";
 
 interface Props {
   slug: string;
   tarifParJoueur: number;
+  typeTournoi: TypeTournoi;
   placesRestantes?: number | null;
   listeAttente?: boolean;
 }
@@ -34,19 +36,18 @@ const joueurComplet = (j: JoueurSaisi) =>
 export function InscriptionForm({
   slug,
   tarifParJoueur,
+  typeTournoi,
   placesRestantes,
   listeAttente = false,
 }: Props) {
+  const nombreJoueurs = NB_JOUEURS_PAR_TYPE[typeTournoi];
   const [nomEquipe, setNomEquipe] = useState("");
   const [contactNom, setContactNom] = useState("");
   const [contactPrenom, setContactPrenom] = useState("");
   const [contactTel, setContactTel] = useState("");
-  const [joueurs, setJoueurs] = useState<JoueurSaisi[]>([
-    vide(),
-    vide(),
-    vide(),
-    vide(),
-  ]);
+  const [joueurs, setJoueurs] = useState<JoueurSaisi[]>(() =>
+    Array.from({ length: nombreJoueurs }, vide)
+  );
   const [cases, setCases] = useState<boolean[]>([false, false, false]);
   const [loading, setLoading] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
@@ -73,7 +74,7 @@ export function InscriptionForm({
   const peutValider =
     nomOk &&
     contactOk &&
-    nbComplets >= 4 &&
+    nbComplets === nombreJoueurs &&
     !lignesEntameesInvalides &&
     casesOk &&
     !loading;
@@ -82,13 +83,6 @@ export function InscriptionForm({
     setJoueurs((prev) =>
       prev.map((j, idx) => (idx === i ? { ...j, [champ]: v } : j))
     );
-  }
-  function ajouterJoueur() {
-    if (joueurs.length < 8) setJoueurs((prev) => [...prev, vide()]);
-  }
-  function retirerJoueur(i: number) {
-    if (joueurs.length > 4)
-      setJoueurs((prev) => prev.filter((_, idx) => idx !== i));
   }
   function toggleCase(i: number) {
     setCases((prev) => prev.map((c, idx) => (idx === i ? !c : c)));
@@ -264,12 +258,11 @@ export function InscriptionForm({
           Joueurs
         </h2>
         <p className="mb-4 text-sm text-ardoise">
-          Minimum 4, maximum 8 joueurs. Prénom, nom et adresse e-mail sont
-          obligatoires pour chaque joueur.
+          Cette équipe doit comporter exactement {nombreJoueurs} joueurs.
+          Prénom, nom et adresse e-mail sont obligatoires pour chaque joueur.
         </p>
         <div className="space-y-5">
           {joueurs.map((j, i) => {
-            const obligatoire = i < 4;
             const entamee =
               j.prenom.trim() !== "" ||
               j.nom.trim() !== "" ||
@@ -283,23 +276,8 @@ export function InscriptionForm({
                 <div className="mb-3 flex items-center justify-between">
                   <span className="text-sm font-medium text-encre">
                     Joueur {i + 1}{" "}
-                    {obligatoire ? (
-                      <Req />
-                    ) : (
-                      <span className="font-normal text-ardoise/70">
-                        (optionnel)
-                      </span>
-                    )}
+                    <Req />
                   </span>
-                  {!obligatoire && (
-                    <button
-                      type="button"
-                      onClick={() => retirerJoueur(i)}
-                      className="text-sm text-nonpaye hover:underline"
-                    >
-                      Retirer
-                    </button>
-                  )}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
@@ -359,15 +337,6 @@ export function InscriptionForm({
             );
           })}
         </div>
-        {joueurs.length < 8 && (
-          <button
-            type="button"
-            onClick={ajouterJoueur}
-            className="btn-ghost mt-4 w-full"
-          >
-            + Ajouter un joueur ({joueurs.length}/8)
-          </button>
-        )}
       </section>
 
       {/* Montant + paiement sur place */}
@@ -497,9 +466,9 @@ export function InscriptionForm({
               ? "Renseignez le contact référent (prénom, nom, téléphone)."
               : lignesEntameesInvalides
                 ? "Complétez (ou retirez) les joueurs commencés : prénom, nom et e-mail."
-                : nbComplets < 4
-                  ? `Complétez au moins ${4 - nbComplets} joueur${
-                      4 - nbComplets > 1 ? "s" : ""
+                : nbComplets < nombreJoueurs
+                  ? `Complétez encore ${nombreJoueurs - nbComplets} joueur${
+                      nombreJoueurs - nbComplets > 1 ? "s" : ""
                     } de plus.`
                   : "Cochez les trois engagements pour valider."}
         </p>

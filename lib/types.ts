@@ -1,4 +1,4 @@
-export type TypeTournoi = "4x4" | "3x3" | "mixte" | "beach_camp" | "autre";
+export type TypeTournoi = "4x4" | "3x3" | "2x2";
 export type StatutTournoi = "ouvert" | "cloture";
 
 export interface Tournoi {
@@ -73,9 +73,13 @@ export interface LigneFinance {
 }
 
 export const LIBELLE_TYPE: Record<TypeTournoi, string> = {
-  "4x4": "4 contre 4",
-  "3x3": "3 contre 3",
-  mixte: "Mixte",
-  beach_camp: "Beach Camp",
-  autre: "Autre",
+  "4x4": "4 VS 4",
+  "3x3": "3 VS 3",
+  "2x2": "2 VS 2",
+};
+
+export const NB_JOUEURS_PAR_TYPE: Record<TypeTournoi, number> = {
+  "4x4": 4,
+  "3x3": 3,
+  "2x2": 2,
 };

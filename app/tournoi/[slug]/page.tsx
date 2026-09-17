@@ -106,12 +106,14 @@ export default async function PageInscription({
         <ListeAttente
           slug={params.slug}
           tarifParJoueur={Number(tournoi.tarif_par_joueur)}
+          typeTournoi={tournoi.type}
           maxEquipes={tournoi.max_equipes}
         />
       ) : (
         <InscriptionForm
           slug={params.slug}
           tarifParJoueur={Number(tournoi.tarif_par_joueur)}
+          typeTournoi={tournoi.type}
           placesRestantes={placesRestantes}
         />
       )}

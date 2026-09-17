@@ -7,7 +7,7 @@ import { slugify } from "@/lib/slug";
 import { uploadAffiche } from "@/lib/upload";
 import { LIBELLE_TYPE, type TypeTournoi } from "@/lib/types";
 
-const TYPES: TypeTournoi[] = ["4x4", "3x3", "mixte", "beach_camp", "autre"];
+const TYPES: TypeTournoi[] = ["4x4", "3x3", "2x2"];
 
 export function CreateTournoi() {
   const router = useRouter();
